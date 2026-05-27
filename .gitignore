@@ -1,0 +1,52 @@
+# Unity generated
+/[Ll]ibrary/
+/[Tt]emp/
+/[Oo]bj/
+/[Bb]uild/
+/[Bb]uilds/
+/[Ll]ogs/
+/[Uu]ser[Ss]ettings/
+/[Mm]emory[Cc]aptures/
+/[Rr]ecordings/
+
+# Unity Asset Store tools
+/[Aa]ssets/[Aa]sset[Ss]tore[Tt]ools*/
+
+# Visual Studio
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+
+# Visual Studio Code
+.vscode/
+
+# MonoDevelop
+*.pidb
+*.userprefs
+
+# Unity solution files (generated)
+*.sln
+*.csproj
+
+# OS generated
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# Crash reports
+sysinfo.txt
+/crashlytics-build.properties
