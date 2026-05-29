@@ -1,0 +1,13 @@
+fileFormatVersion: 2
+guid: 0a4b0bce1e250a14bb534d70bce205fa
+ShaderImporter:
+  defaultTextures: []
+  userData: 
+  assetBundleName: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 96689
+  packageName: Low Poly African Instruments
+  packageVersion: 1.0
+  assetPath: Assets/LowPolyAfricanInstruments/Standard Assets/Effects/TessellationShaders/Shaders/BumpedSpecularDisplacement.shader
+  uploadId: 192647

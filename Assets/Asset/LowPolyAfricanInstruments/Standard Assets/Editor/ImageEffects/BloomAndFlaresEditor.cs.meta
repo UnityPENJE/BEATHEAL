@@ -1,0 +1,16 @@
+fileFormatVersion: 2
+guid: 4deca87cb459d1642ac8f734856ca84e
+MonoImporter:
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 96689
+  packageName: Low Poly African Instruments
+  packageVersion: 1.0
+  assetPath: Assets/LowPolyAfricanInstruments/Standard Assets/Editor/ImageEffects/BloomAndFlaresEditor.cs
+  uploadId: 192647

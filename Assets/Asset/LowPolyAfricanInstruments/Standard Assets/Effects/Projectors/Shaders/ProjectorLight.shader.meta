@@ -1,0 +1,13 @@
+fileFormatVersion: 2
+guid: c0ace1ca4bc0718448acf798c93d52d9
+ShaderImporter:
+  defaultTextures: []
+  userData: 
+  assetBundleName: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 96689
+  packageName: Low Poly African Instruments
+  packageVersion: 1.0
+  assetPath: Assets/LowPolyAfricanInstruments/Standard Assets/Effects/Projectors/Shaders/ProjectorLight.shader
+  uploadId: 192647
