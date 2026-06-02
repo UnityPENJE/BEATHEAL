@@ -7490,6 +7490,10 @@ PrefabInstance:
       propertyPath: m_Name
       value: XR Origin (XR Rig)
       objectReference: {fileID: 0}
+    - target: {fileID: 1717954561962503725, guid: f6336ac4ac8b4d34bc5072418cdc62a0, type: 3}
+      propertyPath: m_TagString
+      value: XRController
+      objectReference: {fileID: 0}
     - target: {fileID: 1717954561962503726, guid: f6336ac4ac8b4d34bc5072418cdc62a0, type: 3}
       propertyPath: m_LocalPosition.x
       value: -48.74932
@@ -7941,7 +7945,7 @@ Transform:
   m_GameObject: {fileID: 1251251849}
   serializedVersion: 2
   m_LocalRotation: {x: -0, y: 0.9878103, z: -0, w: 0.15566267}
-  m_LocalPosition: {x: -47.16, y: 17.36, z: -13.01}
+  m_LocalPosition: {x: -48.16, y: 17.36, z: -8.85}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []

@@ -1,12 +1,14 @@
 using UnityEngine;
 using UnityEditor;
+using UnityEditor.Events;
+using UnityEngine.UI;
 
 public class BeatHealSetup : EditorWindow
 {
     int   instrumentCount = 5;
-    float radius          = 1.8f;
+    float radius          = 1.25f;  // 노트 간격 축소
     float heightOffset    = 1.0f;
-    float arcDegrees      = 150f;
+    float arcDegrees      = 95f;     // 호 각도 축소 → 악기들이 더 가까이 모임
 
     static readonly Color[] InstrumentColors =
     {
@@ -33,6 +35,290 @@ public class BeatHealSetup : EditorWindow
         if (GUILayout.Button("악기 배치 생성")) CreateInstruments();
         if (GUILayout.Button("무대 바닥 생성")) CreateStage();
         if (GUILayout.Button("조명 세팅"))     CreateLights();
+        GUILayout.Space(10);
+        GUILayout.Label("게임 시스템", EditorStyles.boldLabel);
+        if (GUILayout.Button("게임 시스템 + UI 세팅 (자동 연결)")) CreateGameSystem();
+        GUILayout.Space(10);
+        GUILayout.Label("상호작용", EditorStyles.boldLabel);
+        if (GUILayout.Button("컨트롤러에 드럼스틱 부착")) CreateControllerSticks();
+    }
+
+    // 양손 컨트롤러에 드럼스틱(콜라이더 + XRController 태그)을 부착해 악기를 칠 수 있게 함
+    void CreateControllerSticks()
+    {
+        EnsureTag("XRController");
+
+        // 이름에 "controller"가 들어간 트랜스폼을 컨트롤러로 간주
+        var controllers = new System.Collections.Generic.List<Transform>();
+        foreach (var t in GameObject.FindObjectsOfType<Transform>())
+        {
+            string n = t.name.ToLower();
+            if (n.Contains("controller") && !n.Contains("xr origin") && !n.Contains("interaction manager"))
+                controllers.Add(t);
+        }
+
+        if (controllers.Count == 0)
+        {
+            Debug.LogWarning("[BeatHeal] 컨트롤러를 찾지 못했습니다. XR Rig의 Left/Right Controller가 씬에 있는지 확인하세요. " +
+                             "수동으로 컨트롤러에 드럼스틱을 붙이려면 이 함수의 AttachStick 로직을 참고하세요.");
+            return;
+        }
+
+        int count = 0;
+        foreach (var c in controllers)
+        {
+            AttachStick(c);
+            count++;
+        }
+        Debug.Log($"[BeatHeal] 드럼스틱 {count}개 부착 완료! (대상: {string.Join(", ", controllers.ConvertAll(x => x.name))})");
+    }
+
+    void AttachStick(Transform controller)
+    {
+        // 중복 방지
+        var existing = controller.Find("DrumStick");
+        if (existing != null) DestroyImmediate(existing.gameObject);
+
+        var stick = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        stick.name = "DrumStick";
+        stick.transform.SetParent(controller, false);
+        stick.transform.localPosition = new Vector3(0f, 0f, 0.18f);  // 컨트롤러 앞으로
+        stick.transform.localRotation = Quaternion.Euler(90f, 0f, 0f); // Z축 방향으로 눕힘
+        stick.transform.localScale = new Vector3(0.02f, 0.18f, 0.02f); // 가늘고 길게 (약 0.36m)
+        stick.tag = "XRController";
+
+        // 트리거 콜라이더 (악기와 겹치면 InstrumentPanel.OnTriggerEnter 발생)
+        var col = stick.GetComponent<CapsuleCollider>();
+        col.isTrigger = true;
+
+        Undo.RegisterCreatedObjectUndo(stick, "Create DrumStick");
+    }
+
+    // 태그가 없으면 ProjectSettings에 추가
+    static void EnsureTag(string tag)
+    {
+        var assets = AssetDatabase.LoadAllAssetsAtPath("ProjectSettings/TagManager.asset");
+        if (assets == null || assets.Length == 0) return;
+
+        var so = new SerializedObject(assets[0]);
+        var tagsProp = so.FindProperty("tags");
+        for (int i = 0; i < tagsProp.arraySize; i++)
+            if (tagsProp.GetArrayElementAtIndex(i).stringValue == tag) return;
+
+        tagsProp.InsertArrayElementAtIndex(tagsProp.arraySize);
+        tagsProp.GetArrayElementAtIndex(tagsProp.arraySize - 1).stringValue = tag;
+        so.ApplyModifiedProperties();
+        Debug.Log($"[BeatHeal] 태그 '{tag}' 추가됨.");
+    }
+
+    // GameManager / SequenceManager / UIManager + Canvas UI 자동 생성 및 참조 연결
+    void CreateGameSystem()
+    {
+        // 기존 정리
+        var old = GameObject.Find("GameSystem");
+        if (old != null) DestroyImmediate(old);
+        var oldCanvas = GameObject.Find("GameCanvas");
+        if (oldCanvas != null) DestroyImmediate(oldCanvas);
+
+        // --- 매니저 오브젝트 ---
+        var sys = new GameObject("GameSystem");
+        var game = sys.AddComponent<GameManager>();
+        var seq  = sys.AddComponent<SequenceManager>();
+        var ui   = sys.AddComponent<UIManager>();
+        var tut  = sys.AddComponent<TutorialManager>();
+
+        game.sequenceManager = seq;
+        game.uiManager = ui;
+        ui.game = game;
+        ui.tutorial = tut;
+        tut.uiManager = ui;
+
+        // 악기 배열 연결
+        var instParent = GameObject.Find("Instruments");
+        if (instParent != null)
+        {
+            seq.instruments = instParent.GetComponentsInChildren<InstrumentPanel>();
+            tut.instruments = seq.instruments;
+        }
+        else
+            Debug.LogWarning("[BeatHeal] Instruments를 찾지 못했습니다. 먼저 '악기 배치 생성'을 실행하세요.");
+
+        // 무대 조명 연결 (관객 반응용)
+        var stageLight = GameObject.Find("StagePointLight");
+        if (stageLight != null) ui.stageLight = stageLight.GetComponent<Light>();
+
+        // --- Canvas (World Space, VR에서 보이도록) ---
+        var canvasObj = new GameObject("GameCanvas");
+        var canvas = canvasObj.AddComponent<Canvas>();
+        canvas.renderMode = RenderMode.WorldSpace;
+        canvasObj.AddComponent<CanvasScaler>();
+        canvasObj.AddComponent<GraphicRaycaster>();
+
+        var center = instParent != null ? instParent.transform.position : Vector3.zero;
+        canvasObj.transform.position = center + new Vector3(0f, 1.6f, 1.5f);
+        // 플레이어(+Z 방향을 봄)를 향하도록 180° 회전 → 글자가 정방향으로 보임
+        canvasObj.transform.rotation = Quaternion.Euler(0f, 180f, 0f);
+        canvasObj.transform.localScale = Vector3.one * 0.003f;
+        var crt = canvasObj.GetComponent<RectTransform>();
+        crt.sizeDelta = new Vector2(800, 820); // 난이도+튜토리얼 버튼이 들어가도록 세로 확장
+
+        // World Space 캔버스는 이벤트 카메라가 있어야 버튼 클릭(레이캐스트)이 동작함
+        canvas.worldCamera = Camera.main ?? GameObject.FindObjectOfType<Camera>();
+
+        // XR 컨트롤러 레이로 UI를 누르려면 TrackedDeviceGraphicRaycaster가 필요 (마우스도 같이 동작)
+        AddXRComponent(canvasObj, "UnityEngine.XR.Interaction.Toolkit.UI.TrackedDeviceGraphicRaycaster");
+
+        // EventSystem 세팅
+        var existingES = GameObject.FindObjectOfType<UnityEngine.EventSystems.EventSystem>();
+        GameObject esObj = existingES != null ? existingES.gameObject : null;
+        if (esObj == null)
+        {
+            esObj = new GameObject("EventSystem");
+            esObj.AddComponent<UnityEngine.EventSystems.EventSystem>();
+        }
+
+        // XR UI Input Module 우선 사용 (없으면 StandaloneInputModule 폴백)
+        var xrModule = AddXRComponent(esObj, "UnityEngine.XR.Interaction.Toolkit.UI.XRUIInputModule");
+        if (xrModule != null)
+        {
+            // XR 모듈을 쓰면 StandaloneInputModule은 충돌하므로 제거
+            var legacy = esObj.GetComponent<UnityEngine.EventSystems.StandaloneInputModule>();
+            if (legacy != null) DestroyImmediate(legacy);
+        }
+        else if (esObj.GetComponent<UnityEngine.EventSystems.BaseInputModule>() == null)
+        {
+            esObj.AddComponent<UnityEngine.EventSystems.StandaloneInputModule>();
+            Debug.LogWarning("[BeatHeal] XRUIInputModule을 찾지 못해 StandaloneInputModule(마우스 전용)로 폴백했습니다.");
+        }
+
+        // --- 타이틀 패널 (난이도 선택) ---
+        var title = MakePanel("TitlePanel", canvasObj.transform);
+        MakeText("Title", title.transform, "BEAT HEAL", 60, new Vector2(0, 200));
+        MakeText("Subtitle", title.transform, "난이도 선택", 32, new Vector2(0, 90));
+
+        var easyBtn   = MakeButton("EasyButton",   title.transform, "쉬움 (악기 3개)",   new Vector2(0, 0),
+                                   new Color(0.2f, 0.7f, 0.3f));
+        var normalBtn = MakeButton("NormalButton", title.transform, "보통 (악기 5개)",   new Vector2(0, -110),
+                                   new Color(0.2f, 0.5f, 0.9f));
+        var hardBtn   = MakeButton("HardButton",   title.transform, "어려움 (악기 전부)", new Vector2(0, -220),
+                                   new Color(0.85f, 0.3f, 0.2f));
+
+        UnityEventTools.AddIntPersistentListener(easyBtn.onClick,   ui.StartWithDifficulty, 0);
+        UnityEventTools.AddIntPersistentListener(normalBtn.onClick, ui.StartWithDifficulty, 1);
+        UnityEventTools.AddIntPersistentListener(hardBtn.onClick,   ui.StartWithDifficulty, 2);
+
+        // 튜토리얼 버튼
+        var tutBtn = MakeButton("TutorialButton", title.transform, "튜토리얼", new Vector2(0, -310),
+                                new Color(0.5f, 0.4f, 0.7f));
+        UnityEventTools.AddPersistentListener(tutBtn.onClick, ui.OnTutorialButton);
+
+        // --- HUD 패널 ---
+        var hud = MakePanel("HudPanel", canvasObj.transform, transparent: true);
+        ui.hpText        = MakeText("HP",    hud.transform, "HP: @@@",  36, new Vector2(-250, 250));
+        ui.scoreText     = MakeText("Score", hud.transform, "SCORE: 0", 36, new Vector2(250, 250));
+        ui.comboText     = MakeText("Combo", hud.transform, "",         48, new Vector2(0, 0));
+        ui.roundText     = MakeText("Round", hud.transform, "ROUND 1",  36, new Vector2(0, 250));
+        ui.countdownText = MakeText("Countdown", hud.transform, "3",    120, new Vector2(0, -100));
+        // 기믹 안내 배너
+        ui.bannerText    = MakeText("Banner", hud.transform, "", 40, new Vector2(0, 150));
+        ui.bannerText.color = new Color(1f, 0.9f, 0.2f);
+        ui.bannerText.gameObject.SetActive(false);
+        hud.SetActive(false);
+
+        // --- 튜토리얼 패널 ---
+        var tutPanel = MakePanel("TutorialPanel", canvasObj.transform);
+        ui.tutorialText = MakeText("TutorialText", tutPanel.transform, "", 34, new Vector2(0, 220));
+        MakeText("TutorialHint", tutPanel.transform, "(드럼스틱으로 악기를 치세요)", 26, new Vector2(0, -260));
+        var tutSkipBtn = MakeButton("SkipButton", tutPanel.transform, "건너뛰기", new Vector2(0, -330),
+                                    new Color(0.4f, 0.4f, 0.4f));
+        UnityEventTools.AddPersistentListener(tutSkipBtn.onClick, tut.StopTutorial);
+        UnityEventTools.AddPersistentListener(tutSkipBtn.onClick, ui.EndTutorial);
+        tutPanel.SetActive(false);
+        ui.tutorialPanel = tutPanel;
+
+        // --- 결과 패널 ---
+        var result = MakePanel("ResultPanel", canvasObj.transform);
+        ui.resultText = MakeText("Result", result.transform, "GAME OVER", 36, new Vector2(0, 80));
+        var restartBtn = MakeButton("RestartButton", result.transform, "다시 하기", new Vector2(0, -200));
+        UnityEventTools.AddPersistentListener(restartBtn.onClick, ui.OnRestartButton);
+        result.SetActive(false);
+
+        ui.titlePanel  = title;
+        ui.hudPanel    = hud;
+        ui.resultPanel = result;
+
+        Undo.RegisterCreatedObjectUndo(sys, "Create GameSystem");
+        Undo.RegisterCreatedObjectUndo(canvasObj, "Create GameCanvas");
+        Selection.activeGameObject = sys;
+        Debug.Log("[BeatHeal] 게임 시스템 + UI 세팅 완료! (참조 자동 연결됨)");
+    }
+
+    // XRI 타입을 리플렉션으로 찾아 컴포넌트로 추가 (없으면 null + 경고). 컴파일 의존성 회피용.
+    Component AddXRComponent(GameObject go, string fullTypeName)
+    {
+        var type = System.Type.GetType(fullTypeName + ", Unity.XR.Interaction.Toolkit");
+        if (type == null)
+        {
+            // 어셈블리 한정 없이 전체 로드된 어셈블리에서 탐색
+            foreach (var asm in System.AppDomain.CurrentDomain.GetAssemblies())
+            {
+                type = asm.GetType(fullTypeName);
+                if (type != null) break;
+            }
+        }
+        if (type == null)
+        {
+            Debug.LogWarning($"[BeatHeal] {fullTypeName} 타입을 찾지 못했습니다 (XR Interaction Toolkit 미설치?).");
+            return null;
+        }
+        var existing = go.GetComponent(type);
+        return existing != null ? existing : go.AddComponent(type);
+    }
+
+    GameObject MakePanel(string name, Transform parent, bool transparent = false)
+    {
+        var go = new GameObject(name, typeof(RectTransform));
+        go.transform.SetParent(parent, false);
+        var rt = go.GetComponent<RectTransform>();
+        rt.anchorMin = Vector2.zero; rt.anchorMax = Vector2.one;
+        rt.offsetMin = Vector2.zero; rt.offsetMax = Vector2.zero;
+        var img = go.AddComponent<Image>();
+        img.color = transparent ? new Color(0, 0, 0, 0f) : new Color(0, 0, 0, 0.7f);
+        img.raycastTarget = false;
+        return go;
+    }
+
+    Text MakeText(string name, Transform parent, string content, int size, Vector2 pos)
+    {
+        var go = new GameObject(name, typeof(RectTransform));
+        go.transform.SetParent(parent, false);
+        var t = go.AddComponent<Text>();
+        t.text = content;
+        t.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf")
+              ?? Resources.GetBuiltinResource<Font>("Arial.ttf");
+        t.fontSize = size;
+        t.alignment = TextAnchor.MiddleCenter;
+        t.color = Color.white;
+        t.horizontalOverflow = HorizontalWrapMode.Overflow;
+        t.verticalOverflow = VerticalWrapMode.Overflow;
+        var rt = go.GetComponent<RectTransform>();
+        rt.sizeDelta = new Vector2(700, 200);
+        rt.anchoredPosition = pos;
+        return t;
+    }
+
+    Button MakeButton(string name, Transform parent, string label, Vector2 pos, Color? color = null)
+    {
+        var go = new GameObject(name, typeof(RectTransform));
+        go.transform.SetParent(parent, false);
+        var img = go.AddComponent<Image>();
+        img.color = color ?? new Color(0.2f, 0.5f, 0.9f, 1f);
+        var btn = go.AddComponent<Button>();
+        var rt = go.GetComponent<RectTransform>();
+        rt.sizeDelta = new Vector2(360, 90);
+        rt.anchoredPosition = pos;
+        MakeText(name + "_Label", go.transform, label, 32, Vector2.zero);
+        return btn;
     }
 
     void CreateInstruments()
@@ -90,7 +376,8 @@ public class BeatHealSetup : EditorWindow
             var panel = obj.AddComponent<InstrumentPanel>();
             panel.instrumentIndex = i;
             panel.idleColor = col;
-            panel.litColor  = Color.Lerp(col, Color.white, 0.7f);
+            // 고유색을 유지하되 살짝만 밝게 → 발광 효과로 충분히 도드라짐
+            panel.litColor  = Color.Lerp(col, Color.white, 0.3f);
 
             // 악기 전용 포인트 라이트 (악기 바로 위)
             var lightObj = new GameObject($"Instrument_{i}_Light");
