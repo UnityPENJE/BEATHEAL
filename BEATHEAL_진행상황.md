@@ -121,7 +121,7 @@ Scene
 
 ---
 
-## 상호작용 방식 — 드럼스틱
+## 상호작용 방식 — 드럼스틱 / VR 맨손
 
 컨트롤러에 **드럼스틱(가는 실린더 + 트리거 콜라이더 + `XRController` 태그)**을 달아
 악기를 쳐서 상호작용함. `BeatHeal → Setup Scene → 컨트롤러에 드럼스틱 부착` 버튼이:
@@ -129,7 +129,46 @@ Scene
 - 이름에 "controller"가 포함된 트랜스폼(양손 컨트롤러)에 `DrumStick` 자식 생성
 - 빠른 스윙 대응용 키네마틱 Rigidbody 포함
 
-> `Hand` 태그는 Hand Tracking 사용 시에만 필요 (현재 미사용).
+### ✅ VR 핸드 트래킹 (맨손 입력) 추가됨
+- `HandPokeDriver.cs` — XR Hands(`XRHandSubsystem`)로 양손 검지·중지 끝에
+  `Hand` 태그 트리거 콜라이더를 따라가게 함 → **컨트롤러 없이 맨손으로 악기 타격**
+- `[RuntimeInitializeOnLoadMethod]`로 Play 시 XR Origin의 Camera Offset 아래에 **자동 설치** (버튼 불필요)
+- `BeatHeal → Setup Scene → 핸드 트래킹(VR 손) 세팅` 버튼으로 수동 부착도 가능
+- `Hand` 태그는 이미 프로젝트에 존재. OpenXR Hand Tracking Subsystem 기능은 활성화됨
+- ⚠ 핸드 트래킹은 **실제 Quest 헤드셋에서만** 동작 (XR Device Simulator로는 테스트 불가)
+
+> 드럼스틱(컨트롤러)과 맨손은 둘 다 `InstrumentPanel.OnTriggerEnter`의 `XRController`/`Hand` 태그를 통해 동작 — 병행 가능.
+
+---
+
+## 번외 스테이지 — 비트세이버식 리듬 모드 (신규)
+
+기존 5개 악기를 **레인**으로 재사용해, 노트가 뒤에서 다가오면 타이밍 맞게 치는 모드.
+- `RhythmNote.cs` — 악기 뒤 먼 곳에서 생성돼 악기(타격선)로 다가오는 노트. 악기와 **같은 실린더 모양/색**. 통과하면 놓침 처리
+- `RhythmStageManager.cs` — 노트 스폰/판정. 악기 터치(드럼스틱·맨손 공용)로 판정:
+  - `hitWindow` 안 = 성공, `perfectWindow` 안 = PERFECT
+  - **사용 레인 화이트리스트**: 기본 2·4번(인덱스 1,3)만, 나머지 숨김
+  - 기본값: travelTime 1.1s, spawnInterval 0.45s, noteCount 50 (난이도 상향됨)
+- **리듬 전용 100 HP 시스템**:
+  - 성공 시 회복(GOOD +4 / PERFECT +7), 빗맞춤 −8, 놓침 −10, 0이면 게임오버
+  - `GameManager.RhythmHeal/RhythmDamage`, `CurrentMaxHP`로 사이먼(3HP)과 분리
+- 진입: 타이틀의 **🎵 리듬 모드 (번외)** 버튼 (`BeatHeal → Setup Scene → 보너스 스테이지(리듬) 세팅`으로 생성)
+
+---
+
+## UI — HP 게이지 바 (이미지화)
+
+- 기존 텍스트 하트(`@@@`) → **이미지 게이지 바**로 교체 (`UIManager.hpFill`, Image Type=Filled)
+- HP 비율에 따라 색 변화(빨강→노랑→초록) + `HP 64 / 100` 숫자 라벨
+- 사이먼·리듬 공통. `BeatHealSetup.MakeHPBar()`가 배경+Fill+라벨 3겹으로 생성
+
+---
+
+## VR 세팅 주의사항 (트러블슈팅 기록)
+
+- **XR Device Simulator는 실기 테스트 시 비활성화** 필요 — 켜져 있으면 Quest 트래킹과 충돌해
+  "카메라가 땅에 박히고 화면이 머리 따라 도는" 증상 발생. 씬에서 `XR Device Simulator` 오브젝트를 꺼둠
+- Quest Link 사용 시 PC의 **활성 OpenXR 런타임을 Meta**로 설정해야 VR 모드로 진입(아니면 평면 모니터로 보임)
 
 ---
 
