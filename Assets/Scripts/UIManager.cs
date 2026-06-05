@@ -13,8 +13,9 @@ public class UIManager : MonoBehaviour
     public GameObject hudPanel;
     public GameObject resultPanel;
 
-    [Header("HUD 텍스트")]
-    public Text hpText;
+    [Header("HUD — HP 게이지")]
+    public Image hpFill;                  // 채워지는 HP 바 (Image Type=Filled)
+    public Text hpText;                   // HP 바 위 숫자 라벨 (예: 64/100)
     public Text scoreText;
     public Text comboText;
     public Text roundText;
@@ -94,6 +95,16 @@ public class UIManager : MonoBehaviour
     // 하위호환: 기존 단일 시작 버튼 (보통 난이도)
     public void OnStartButton() => StartWithDifficulty(1);
 
+    // 번외 스테이지(리듬 모드) 시작 버튼이 호출
+    public void StartBonusStage()
+    {
+        SetActive(titlePanel, false);
+        SetActive(hudPanel, true);
+        SetActive(resultPanel, false);
+        SetActive(tutorialPanel, false);
+        game?.StartBonusStage();
+    }
+
     // 결과 화면 → 타이틀로 돌아가 난이도 재선택
     public void OnRestartButton()
     {
@@ -132,7 +143,19 @@ public class UIManager : MonoBehaviour
     void RefreshHUD()
     {
         if (game == null) return;
-        if (hpText != null)    hpText.text    = "HP: " + new string('@', Mathf.Max(0, game.HP)) + "   (" + game.HP + ")";
+        // HP 게이지 (이미지 바 + 숫자 라벨) — 사이먼/리듬 공통
+        int hpMax = Mathf.Max(1, game.CurrentMaxHP);
+        int hpCur = Mathf.Clamp(game.HP, 0, hpMax);
+        float hpRatio = hpCur / (float)hpMax;
+        if (hpFill != null)
+        {
+            hpFill.fillAmount = hpRatio;
+            // 체력에 따라 색 변화: 빨강(낮음) → 노랑 → 초록(높음)
+            hpFill.color = hpRatio > 0.5f
+                ? Color.Lerp(new Color(1f, 0.85f, 0.1f), new Color(0.2f, 0.9f, 0.35f), (hpRatio - 0.5f) * 2f)
+                : Color.Lerp(new Color(0.9f, 0.2f, 0.2f), new Color(1f, 0.85f, 0.1f), hpRatio * 2f);
+        }
+        if (hpText != null) hpText.text = $"HP  {hpCur} / {hpMax}";
         if (scoreText != null) scoreText.text = "SCORE: " + game.Score;
         if (comboText != null) comboText.text = game.Combo > 1 ? "COMBO x" + game.Combo : "";
         if (roundText != null) roundText.text = "ROUND " + game.Round + "  ·  " + DiffName(game.CurrentDifficulty);

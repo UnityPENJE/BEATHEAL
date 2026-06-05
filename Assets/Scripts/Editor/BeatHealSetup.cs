@@ -41,6 +41,90 @@ public class BeatHealSetup : EditorWindow
         GUILayout.Space(10);
         GUILayout.Label("상호작용", EditorStyles.boldLabel);
         if (GUILayout.Button("컨트롤러에 드럼스틱 부착")) CreateControllerSticks();
+        if (GUILayout.Button("핸드 트래킹(VR 손) 세팅")) SetupHandTracking();
+        GUILayout.Space(10);
+        GUILayout.Label("번외 스테이지", EditorStyles.boldLabel);
+        if (GUILayout.Button("보너스 스테이지(리듬) 세팅")) SetupRhythmStage();
+    }
+
+    // 비트세이버식 리듬 모드를 세팅: RhythmStageManager 생성/연결 + 타이틀에 진입 버튼 추가.
+    // '게임 시스템 + UI 세팅'을 먼저 실행한 뒤 사용해야 한다.
+    void SetupRhythmStage()
+    {
+        var sys = GameObject.Find("GameSystem");
+        if (sys == null)
+        {
+            Debug.LogWarning("[BeatHeal] GameSystem이 없습니다. 먼저 '게임 시스템 + UI 세팅'을 실행하세요.");
+            return;
+        }
+
+        var game = sys.GetComponent<GameManager>();
+        var ui   = sys.GetComponent<UIManager>();
+
+        var rhythm = sys.GetComponent<RhythmStageManager>();
+        if (rhythm == null) rhythm = Undo.AddComponent<RhythmStageManager>(sys);
+
+        // 악기 레인 연결
+        var instParent = GameObject.Find("Instruments");
+        if (instParent != null)
+            rhythm.instruments = instParent.GetComponentsInChildren<InstrumentPanel>(true);
+        else
+            Debug.LogWarning("[BeatHeal] Instruments를 찾지 못했습니다. 먼저 '악기 배치 생성'을 실행하세요.");
+
+        rhythm.game = game;
+        if (game != null) game.rhythmManager = rhythm;
+
+        // 타이틀 패널에 '리듬 모드' 진입 버튼 추가
+        var titlePanel = GameObject.Find("TitlePanel");
+        if (titlePanel != null && ui != null)
+        {
+            var existing = titlePanel.transform.Find("RhythmButton");
+            if (existing != null) DestroyImmediate(existing.gameObject);
+
+            var rhythmBtn = MakeButton("RhythmButton", titlePanel.transform, "🎵 리듬 모드 (번외)",
+                                       new Vector2(0, -410), new Color(0.9f, 0.3f, 0.6f));
+            UnityEventTools.AddPersistentListener(rhythmBtn.onClick, ui.StartBonusStage);
+        }
+        else
+        {
+            Debug.LogWarning("[BeatHeal] TitlePanel을 찾지 못했습니다. '게임 시스템 + UI 세팅'을 먼저 실행하세요. " +
+                             "(매니저는 연결됐으니 UIManager.StartBonusStage를 다른 버튼에 연결해도 됩니다.)");
+        }
+
+        Selection.activeGameObject = sys;
+        Debug.Log("[BeatHeal] 보너스 리듬 스테이지 세팅 완료! 타이틀의 '🎵 리듬 모드' 버튼으로 시작합니다.");
+    }
+
+    // 컨트롤러 대신(또는 병행해서) 맨손으로 악기를 칠 수 있도록 핸드 트래킹을 세팅한다.
+    // XR Origin에 HandPokeDriver를 붙여, 손가락 끝에 "Hand" 태그 트리거 콜라이더가 따라가게 한다.
+    void SetupHandTracking()
+    {
+        EnsureTag("Hand");
+
+        var xrOrigin = GameObject.Find("XR Origin (XR Rig)")
+                    ?? GameObject.Find("XR Origin")
+                    ?? GameObject.Find("XRRig");
+
+        if (xrOrigin == null)
+        {
+            Debug.LogWarning("[BeatHeal] XR Origin을 찾지 못했습니다. 씬에 'XR Origin (XR Rig)'이 있는지 확인하세요.");
+            return;
+        }
+
+        var driver = xrOrigin.GetComponent<HandPokeDriver>();
+        if (driver == null)
+        {
+            driver = Undo.AddComponent<HandPokeDriver>(xrOrigin);
+            Debug.Log($"[BeatHeal] HandPokeDriver를 '{xrOrigin.name}'에 부착했습니다.");
+        }
+        else
+        {
+            Debug.Log($"[BeatHeal] '{xrOrigin.name}'에 이미 HandPokeDriver가 있습니다.");
+        }
+
+        Selection.activeGameObject = xrOrigin;
+        Debug.Log("[BeatHeal] 핸드 트래킹 세팅 완료! OpenXR 설정에서 'Hand Tracking Subsystem' 기능을 활성화했는지 확인하세요. " +
+                  "(Project Settings > XR Plug-in Management > OpenXR > 각 플랫폼 탭에서 Hand Tracking 체크)");
     }
 
     // 양손 컨트롤러에 드럼스틱(콜라이더 + XRController 태그)을 부착해 악기를 칠 수 있게 함
@@ -214,7 +298,9 @@ public class BeatHealSetup : EditorWindow
 
         // --- HUD 패널 ---
         var hud = MakePanel("HudPanel", canvasObj.transform, transparent: true);
-        ui.hpText        = MakeText("HP",    hud.transform, "HP: @@@",  36, new Vector2(-250, 250));
+        var hpBar = MakeHPBar("HPBar", hud.transform, new Vector2(-230, 250), new Vector2(380, 50));
+        ui.hpFill = hpBar.fill;
+        ui.hpText = hpBar.label;
         ui.scoreText     = MakeText("Score", hud.transform, "SCORE: 0", 36, new Vector2(250, 250));
         ui.comboText     = MakeText("Combo", hud.transform, "",         48, new Vector2(0, 0));
         ui.roundText     = MakeText("Round", hud.transform, "ROUND 1",  36, new Vector2(0, 250));
@@ -305,6 +391,54 @@ public class BeatHealSetup : EditorWindow
         rt.sizeDelta = new Vector2(700, 200);
         rt.anchoredPosition = pos;
         return t;
+    }
+
+    // 배경 + 채워지는 Fill 이미지 + 숫자 라벨로 구성된 HP 게이지 바를 만든다.
+    (Image fill, Text label) MakeHPBar(string name, Transform parent, Vector2 pos, Vector2 size)
+    {
+        var uiSprite = AssetDatabase.GetBuiltinExtraResource<Sprite>("UI/Skin/UISprite.psd");
+
+        var root = new GameObject(name, typeof(RectTransform));
+        root.transform.SetParent(parent, false);
+        var rrt = root.GetComponent<RectTransform>();
+        rrt.sizeDelta = size;
+        rrt.anchoredPosition = pos;
+
+        // 배경 (어두운 테두리 박스)
+        var bgGo = new GameObject("BG", typeof(RectTransform));
+        bgGo.transform.SetParent(root.transform, false);
+        var bg = bgGo.AddComponent<Image>();
+        bg.sprite = uiSprite;
+        bg.type = Image.Type.Sliced;
+        bg.color = new Color(0f, 0f, 0f, 0.65f);
+        Stretch(bgGo.GetComponent<RectTransform>(), Vector2.zero, Vector2.zero);
+
+        // 채워지는 바 (가로 Filled)
+        var fillGo = new GameObject("Fill", typeof(RectTransform));
+        fillGo.transform.SetParent(root.transform, false);
+        var fill = fillGo.AddComponent<Image>();
+        fill.sprite = uiSprite;
+        fill.type = Image.Type.Filled;
+        fill.fillMethod = Image.FillMethod.Horizontal;
+        fill.fillOrigin = (int)Image.OriginHorizontal.Left;
+        fill.fillAmount = 1f;
+        fill.color = new Color(0.2f, 0.9f, 0.35f);
+        Stretch(fillGo.GetComponent<RectTransform>(), new Vector2(5, 5), new Vector2(-5, -5));
+
+        // 숫자 라벨 (바 위 중앙)
+        var label = MakeText(name + "_Label", root.transform, "HP", 28, Vector2.zero);
+        Stretch(label.GetComponent<RectTransform>(), Vector2.zero, Vector2.zero);
+
+        return (fill, label);
+    }
+
+    // RectTransform을 부모에 꽉 채우되 여백(offset) 적용
+    static void Stretch(RectTransform rt, Vector2 offsetMin, Vector2 offsetMax)
+    {
+        rt.anchorMin = Vector2.zero;
+        rt.anchorMax = Vector2.one;
+        rt.offsetMin = offsetMin;
+        rt.offsetMax = offsetMax;
     }
 
     Button MakeButton(string name, Transform parent, string label, Vector2 pos, Color? color = null)
