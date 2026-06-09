@@ -37,7 +37,10 @@ public class BeatHealSetup : EditorWindow
         if (GUILayout.Button("조명 세팅"))     CreateLights();
         GUILayout.Space(10);
         GUILayout.Label("게임 시스템", EditorStyles.boldLabel);
-        if (GUILayout.Button("게임 시스템 + UI 세팅 (자동 연결)")) CreateGameSystem();
+        if (GUILayout.Button("① 게임 시스템(매니저) 세팅")) CreateManagers();
+        if (GUILayout.Button("② UI 세팅"))                 CreateUI();
+        EditorGUILayout.Space(2);
+        if (GUILayout.Button("①+② 한 번에 (매니저 + UI)")) CreateGameSystem();
         GUILayout.Space(10);
         GUILayout.Label("상호작용", EditorStyles.boldLabel);
         if (GUILayout.Button("컨트롤러에 드럼스틱 부착")) CreateControllerSticks();
@@ -195,14 +198,18 @@ public class BeatHealSetup : EditorWindow
         Debug.Log($"[BeatHeal] 태그 '{tag}' 추가됨.");
     }
 
-    // GameManager / SequenceManager / UIManager + Canvas UI 자동 생성 및 참조 연결
+    // 매니저 + UI를 한 번에 세팅 (편의용 — 내부적으로 둘을 순서대로 호출)
     void CreateGameSystem()
     {
-        // 기존 정리
+        CreateManagers();
+        CreateUI();
+    }
+
+    // === ① 게임 시스템(매니저) 세팅 — 매니저 컴포넌트 생성 + 참조/효과음/악기 연결 ===
+    void CreateManagers()
+    {
         var old = GameObject.Find("GameSystem");
         if (old != null) DestroyImmediate(old);
-        var oldCanvas = GameObject.Find("GameCanvas");
-        if (oldCanvas != null) DestroyImmediate(oldCanvas);
 
         // --- 매니저 오브젝트 ---
         var sys = new GameObject("GameSystem");
@@ -210,19 +217,31 @@ public class BeatHealSetup : EditorWindow
         var seq  = sys.AddComponent<SequenceManager>();
         var ui   = sys.AddComponent<UIManager>();
         var tut  = sys.AddComponent<TutorialManager>();
+        var spawner = sys.AddComponent<BonusBallSpawner>();
+        var rhythm = sys.AddComponent<RhythmStageManager>();
+        var sfx = sys.AddComponent<SfxPlayer>();   // 효과음 재생기 (AudioSource 자동 추가)
+        // 효과음 클립 자동 연결 (Casual Game Sounds 팩 — 파형 분석으로 매칭)
+        const string sfxDir = "Assets/Casual Game Sounds U6/CasualGameSounds/";
+        sfx.hitSuccess = LoadClip(sfxDir + "DM-CGS-30.wav"); // 상승음 차임 = 성공
+        sfx.hitFail    = LoadClip(sfxDir + "DM-CGS-02.wav"); // 하강음 = 실패
+        sfx.ballHit    = LoadClip(sfxDir + "DM-CGS-44.wav"); // 짧은 팝 = 공 타격
 
         game.sequenceManager = seq;
         game.uiManager = ui;
+        game.rhythmManager = rhythm;
         ui.game = game;
         ui.tutorial = tut;
         tut.uiManager = ui;
+        spawner.game = game;
+        rhythm.game = game;
 
         // 악기 배열 연결
         var instParent = GameObject.Find("Instruments");
         if (instParent != null)
         {
-            seq.instruments = instParent.GetComponentsInChildren<InstrumentPanel>();
+            seq.instruments = instParent.GetComponentsInChildren<InstrumentPanel>(true);
             tut.instruments = seq.instruments;
+            rhythm.instruments = seq.instruments;   // 리듬 모드도 같은 악기 레인 사용
         }
         else
             Debug.LogWarning("[BeatHeal] Instruments를 찾지 못했습니다. 먼저 '악기 배치 생성'을 실행하세요.");
@@ -230,6 +249,35 @@ public class BeatHealSetup : EditorWindow
         // 무대 조명 연결 (관객 반응용)
         var stageLight = GameObject.Find("StagePointLight");
         if (stageLight != null) ui.stageLight = stageLight.GetComponent<Light>();
+
+        Undo.RegisterCreatedObjectUndo(sys, "Create GameSystem");
+        Selection.activeGameObject = sys;
+        Debug.Log("[BeatHeal] ① 게임 시스템(매니저) 세팅 완료! 이어서 'UI 세팅'을 실행하세요.");
+    }
+
+    // === ② UI 세팅 — Canvas/패널/버튼 생성 + UIManager 참조 연결 (매니저가 먼저 있어야 함) ===
+    void CreateUI()
+    {
+        var sys = GameObject.Find("GameSystem");
+        if (sys == null)
+        {
+            Debug.LogWarning("[BeatHeal] GameSystem이 없습니다. 먼저 '① 게임 시스템(매니저) 세팅'을 실행하세요.");
+            return;
+        }
+
+        var game = sys.GetComponent<GameManager>();
+        var ui   = sys.GetComponent<UIManager>();
+        var tut  = sys.GetComponent<TutorialManager>();
+        if (game == null || ui == null || tut == null)
+        {
+            Debug.LogWarning("[BeatHeal] GameSystem에 매니저 컴포넌트가 없습니다. '① 게임 시스템(매니저) 세팅'을 다시 실행하세요.");
+            return;
+        }
+
+        var oldCanvas = GameObject.Find("GameCanvas");
+        if (oldCanvas != null) DestroyImmediate(oldCanvas);
+
+        var instParent = GameObject.Find("Instruments");
 
         // --- Canvas (World Space, VR에서 보이도록) ---
         var canvasObj = new GameObject("GameCanvas");
@@ -244,7 +292,7 @@ public class BeatHealSetup : EditorWindow
         canvasObj.transform.rotation = Quaternion.Euler(0f, 180f, 0f);
         canvasObj.transform.localScale = Vector3.one * 0.003f;
         var crt = canvasObj.GetComponent<RectTransform>();
-        crt.sizeDelta = new Vector2(800, 820); // 난이도+튜토리얼 버튼이 들어가도록 세로 확장
+        crt.sizeDelta = new Vector2(800, 980); // 난이도 4종+튜토리얼+리듬 버튼이 들어가도록 세로 확장
 
         // World Space 캔버스는 이벤트 카메라가 있어야 버튼 클릭(레이캐스트)이 동작함
         canvas.worldCamera = Camera.main ?? GameObject.FindObjectOfType<Camera>();
@@ -277,30 +325,47 @@ public class BeatHealSetup : EditorWindow
 
         // --- 타이틀 패널 (난이도 선택) ---
         var title = MakePanel("TitlePanel", canvasObj.transform);
-        MakeText("Title", title.transform, "BEAT HEAL", 60, new Vector2(0, 200));
-        MakeText("Subtitle", title.transform, "난이도 선택", 32, new Vector2(0, 90));
+        MakeText("Title", title.transform, "BEAT HEAL", 60, new Vector2(0, 300));
+        MakeText("Subtitle", title.transform, "난이도 선택", 32, new Vector2(0, 210));
 
-        var easyBtn   = MakeButton("EasyButton",   title.transform, "쉬움 (악기 3개)",   new Vector2(0, 0),
+        var easyBtn   = MakeButton("EasyButton",   title.transform, "쉬움 (악기 3개)",      new Vector2(0, 115),
                                    new Color(0.2f, 0.7f, 0.3f));
-        var normalBtn = MakeButton("NormalButton", title.transform, "보통 (악기 5개)",   new Vector2(0, -110),
+        var normalBtn = MakeButton("NormalButton", title.transform, "보통 (악기 5개)",      new Vector2(0, 20),
                                    new Color(0.2f, 0.5f, 0.9f));
-        var hardBtn   = MakeButton("HardButton",   title.transform, "어려움 (악기 전부)", new Vector2(0, -220),
+        var hardBtn   = MakeButton("HardButton",   title.transform, "어려움 (악기 전부)",    new Vector2(0, -75),
                                    new Color(0.85f, 0.3f, 0.2f));
+        var ultraBtn  = MakeButton("UltraHardButton", title.transform, "초 하드 (공 날아옴!)", new Vector2(0, -170),
+                                   new Color(0.6f, 0.1f, 0.15f));
 
         UnityEventTools.AddIntPersistentListener(easyBtn.onClick,   ui.StartWithDifficulty, 0);
         UnityEventTools.AddIntPersistentListener(normalBtn.onClick, ui.StartWithDifficulty, 1);
         UnityEventTools.AddIntPersistentListener(hardBtn.onClick,   ui.StartWithDifficulty, 2);
+        UnityEventTools.AddIntPersistentListener(ultraBtn.onClick,  ui.StartWithDifficulty, 3);
 
         // 튜토리얼 버튼
-        var tutBtn = MakeButton("TutorialButton", title.transform, "튜토리얼", new Vector2(0, -310),
+        var tutBtn = MakeButton("TutorialButton", title.transform, "튜토리얼", new Vector2(0, -265),
                                 new Color(0.5f, 0.4f, 0.7f));
         UnityEventTools.AddPersistentListener(tutBtn.onClick, ui.OnTutorialButton);
 
-        // --- HUD 패널 ---
-        var hud = MakePanel("HudPanel", canvasObj.transform, transparent: true);
-        var hpBar = MakeHPBar("HPBar", hud.transform, new Vector2(-230, 250), new Vector2(380, 50));
+        // 리듬 모드(번외) 진입 버튼 — 재실행 시 사라지지 않도록 여기서 함께 생성
+        var rhythmBtn = MakeButton("RhythmButton", title.transform, "🎵 리듬 모드 (번외)", new Vector2(0, -360),
+                                   new Color(0.9f, 0.3f, 0.6f));
+        UnityEventTools.AddPersistentListener(rhythmBtn.onClick, ui.StartBonusStage);
+
+        // --- HP 전용 패널 (HUD와 분리, 좌상단 강조 배치) ---
+        var hpPanel = MakePanel("HpPanel", canvasObj.transform, transparent: true);
+        // 사이먼(소량 HP)용: HP 개수만큼 하트 아이콘 (하나씩 사라짐)
+        ui.hpHearts = MakeHearts("HpHearts", hpPanel.transform, new Vector2(-200, 330), game.maxHP);
+        // 리듬(대량 HP)용: fill 게이지 바 (평소엔 숨김, 리듬 모드에서 표시)
+        var hpBar = MakeHPBar("HPBar", hpPanel.transform, new Vector2(-200, 330), new Vector2(460, 64));
+        ui.hpBarRoot = hpBar.root;
         ui.hpFill = hpBar.fill;
         ui.hpText = hpBar.label;
+        ui.hpPanel = hpPanel;
+        hpPanel.SetActive(false);
+
+        // --- HUD 패널 ---
+        var hud = MakePanel("HudPanel", canvasObj.transform, transparent: true);
         ui.scoreText     = MakeText("Score", hud.transform, "SCORE: 0", 36, new Vector2(250, 250));
         ui.comboText     = MakeText("Combo", hud.transform, "",         48, new Vector2(0, 0));
         ui.roundText     = MakeText("Round", hud.transform, "ROUND 1",  36, new Vector2(0, 250));
@@ -309,6 +374,11 @@ public class BeatHealSetup : EditorWindow
         ui.bannerText    = MakeText("Banner", hud.transform, "", 40, new Vector2(0, 150));
         ui.bannerText.color = new Color(1f, 0.9f, 0.2f);
         ui.bannerText.gameObject.SetActive(false);
+        // 스테이지 목표 진행도 (HUD 좌측 상단)
+        ui.goalText = MakeText("Goal", hud.transform, "", 26, new Vector2(-250, 130));
+        ui.goalText.alignment = TextAnchor.UpperLeft;
+        var goalRt = ui.goalText.GetComponent<RectTransform>();
+        goalRt.sizeDelta = new Vector2(440, 140);
         hud.SetActive(false);
 
         // --- 튜토리얼 패널 ---
@@ -333,10 +403,9 @@ public class BeatHealSetup : EditorWindow
         ui.hudPanel    = hud;
         ui.resultPanel = result;
 
-        Undo.RegisterCreatedObjectUndo(sys, "Create GameSystem");
         Undo.RegisterCreatedObjectUndo(canvasObj, "Create GameCanvas");
-        Selection.activeGameObject = sys;
-        Debug.Log("[BeatHeal] 게임 시스템 + UI 세팅 완료! (참조 자동 연결됨)");
+        Selection.activeGameObject = canvasObj;
+        Debug.Log("[BeatHeal] ② UI 세팅 완료! (난이도/리듬 버튼·HP·목표·결과 화면 생성, 참조 자동 연결됨)");
     }
 
     // XRI 타입을 리플렉션으로 찾아 컴포넌트로 추가 (없으면 null + 경고). 컴파일 의존성 회피용.
@@ -359,6 +428,13 @@ public class BeatHealSetup : EditorWindow
         }
         var existing = go.GetComponent(type);
         return existing != null ? existing : go.AddComponent(type);
+    }
+
+    static AudioClip LoadClip(string path)
+    {
+        var c = AssetDatabase.LoadAssetAtPath<AudioClip>(path);
+        if (c == null) Debug.LogWarning("[BeatHeal] 오디오 클립을 찾지 못했습니다: " + path);
+        return c;
     }
 
     GameObject MakePanel(string name, Transform parent, bool transparent = false)
@@ -393,8 +469,9 @@ public class BeatHealSetup : EditorWindow
         return t;
     }
 
-    // 배경 + 채워지는 Fill 이미지 + 숫자 라벨로 구성된 HP 게이지 바를 만든다.
-    (Image fill, Text label) MakeHPBar(string name, Transform parent, Vector2 pos, Vector2 size)
+    // 외곽 프레임 + 배경 + 채워지는 Fill 이미지 + ♥ 아이콘 + 외곽선 숫자 라벨로 구성된
+    // 가독성 높은 HP 게이지 바를 만든다.
+    (Image fill, Text label, GameObject root) MakeHPBar(string name, Transform parent, Vector2 pos, Vector2 size)
     {
         var uiSprite = AssetDatabase.GetBuiltinExtraResource<Sprite>("UI/Skin/UISprite.psd");
 
@@ -404,13 +481,22 @@ public class BeatHealSetup : EditorWindow
         rrt.sizeDelta = size;
         rrt.anchoredPosition = pos;
 
-        // 배경 (어두운 테두리 박스)
+        // 외곽 프레임 (밝은 테두리 → 어두운 배경 위에서 바가 또렷이 보임)
+        var frameGo = new GameObject("Frame", typeof(RectTransform));
+        frameGo.transform.SetParent(root.transform, false);
+        var frame = frameGo.AddComponent<Image>();
+        frame.sprite = uiSprite;
+        frame.type = Image.Type.Sliced;
+        frame.color = new Color(0.95f, 0.95f, 1f, 0.9f);
+        Stretch(frameGo.GetComponent<RectTransform>(), new Vector2(-4, -4), new Vector2(4, 4));
+
+        // 배경 (어두운 박스)
         var bgGo = new GameObject("BG", typeof(RectTransform));
         bgGo.transform.SetParent(root.transform, false);
         var bg = bgGo.AddComponent<Image>();
         bg.sprite = uiSprite;
         bg.type = Image.Type.Sliced;
-        bg.color = new Color(0f, 0f, 0f, 0.65f);
+        bg.color = new Color(0.05f, 0.05f, 0.08f, 0.9f);
         Stretch(bgGo.GetComponent<RectTransform>(), Vector2.zero, Vector2.zero);
 
         // 채워지는 바 (가로 Filled)
@@ -423,13 +509,73 @@ public class BeatHealSetup : EditorWindow
         fill.fillOrigin = (int)Image.OriginHorizontal.Left;
         fill.fillAmount = 1f;
         fill.color = new Color(0.2f, 0.9f, 0.35f);
-        Stretch(fillGo.GetComponent<RectTransform>(), new Vector2(5, 5), new Vector2(-5, -5));
+        Stretch(fillGo.GetComponent<RectTransform>(), new Vector2(6, 6), new Vector2(-6, -6));
 
-        // 숫자 라벨 (바 위 중앙)
-        var label = MakeText(name + "_Label", root.transform, "HP", 28, Vector2.zero);
+        // ♥ 아이콘 (바 왼쪽 바깥)
+        var heart = MakeText(name + "_Heart", root.transform, "♥", 44, Vector2.zero);
+        heart.color = new Color(1f, 0.35f, 0.4f);
+        AddOutline(heart, 2f);
+        var hrt = heart.GetComponent<RectTransform>();
+        hrt.sizeDelta = new Vector2(60, 60);
+        hrt.anchorMin = hrt.anchorMax = new Vector2(0f, 0.5f);
+        hrt.pivot = new Vector2(1f, 0.5f);
+        hrt.anchoredPosition = new Vector2(-8, 0);
+
+        // 숫자 라벨 (바 위 중앙, 굵게 + 외곽선으로 가독성 확보)
+        var label = MakeText(name + "_Label", root.transform, "HP", 30, Vector2.zero);
+        label.fontStyle = FontStyle.Bold;
+        AddOutline(label, 2f);
         Stretch(label.GetComponent<RectTransform>(), Vector2.zero, Vector2.zero);
 
-        return (fill, label);
+        return (fill, label, root);
+    }
+
+    // HP 개수만큼 하트 아이콘을 가로로 나열해 만든다 (HP가 줄면 UIManager가 하나씩 끔).
+    Image[] MakeHearts(string name, Transform parent, Vector2 pos, int count)
+    {
+        count = Mathf.Max(1, count);
+        var heartSprite = AssetDatabase.GetBuiltinExtraResource<Sprite>("UI/Skin/Knob.psd");
+
+        var root = new GameObject(name, typeof(RectTransform));
+        root.transform.SetParent(parent, false);
+        var rrt = root.GetComponent<RectTransform>();
+        rrt.anchoredPosition = pos;
+        rrt.sizeDelta = new Vector2(count * 90f, 90f);
+
+        const float spacing = 84f;
+        float startX = -(count - 1) * spacing / 2f;
+
+        var hearts = new Image[count];
+        for (int i = 0; i < count; i++)
+        {
+            var go = new GameObject("Heart_" + i, typeof(RectTransform));
+            go.transform.SetParent(root.transform, false);
+            var img = go.AddComponent<Image>();
+            img.sprite = heartSprite;        // 원형 노브 스프라이트를 빨간 HP 구슬로 사용
+            img.color = new Color(1f, 0.3f, 0.35f, 1f);
+            var rt = go.GetComponent<RectTransform>();
+            rt.sizeDelta = new Vector2(72, 72);
+            rt.anchoredPosition = new Vector2(startX + i * spacing, 0);
+
+            // 어두운 배경에서도 또렷하게 (그림자)
+            var sh = go.AddComponent<Shadow>();
+            sh.effectColor = new Color(0f, 0f, 0f, 0.6f);
+            sh.effectDistance = new Vector2(2f, -2f);
+
+            hearts[i] = img;
+        }
+        return hearts;
+    }
+
+    // 텍스트에 검은 외곽선 + 그림자를 추가해 어떤 배경에서도 잘 읽히게 한다.
+    static void AddOutline(Text t, float dist)
+    {
+        var outline = t.gameObject.AddComponent<Outline>();
+        outline.effectColor = new Color(0f, 0f, 0f, 0.9f);
+        outline.effectDistance = new Vector2(dist, -dist);
+        var shadow = t.gameObject.AddComponent<Shadow>();
+        shadow.effectColor = new Color(0f, 0f, 0f, 0.6f);
+        shadow.effectDistance = new Vector2(dist, -dist);
     }
 
     // RectTransform을 부모에 꽉 채우되 여백(offset) 적용

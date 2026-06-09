@@ -6,7 +6,7 @@ using UnityEngine.SceneManagement;
 public class GameManager : MonoBehaviour
 {
     public enum State { Title, Countdown, Playing, GameOver }
-    public enum Difficulty { Easy, Normal, Hard }
+    public enum Difficulty { Easy, Normal, Hard, UltraHard }
 
     [Header("참조")]
     public SequenceManager sequenceManager;
@@ -17,6 +17,14 @@ public class GameManager : MonoBehaviour
     public int maxHP = 3;
     public int rhythmMaxHP = 100;          // 리듬 모드 전용 최대 체력
     public float countdownSeconds = 3f;
+    public int bonusBallScore = 200;       // 보너스 공 1개 쳐낼 때 점수
+
+    [Header("스테이지 목표 — 라운드 채우면 클리어 (Easy/Normal/Hard/UltraHard)")]
+    public int[] roundGoals = { 5, 8, 10, 12 };
+
+    public bool RhythmMode { get; private set; }  // true면 보너스 공 스폰 안 함
+    // 보너스 공은 '초 하드' 모드에서만 등장
+    public bool BonusBallsEnabled => !RhythmMode && CurrentDifficulty == Difficulty.UltraHard;
 
     public State CurrentState { get; private set; } = State.Title;
     public Difficulty CurrentDifficulty { get; private set; } = Difficulty.Normal;
@@ -25,6 +33,17 @@ public class GameManager : MonoBehaviour
     public int Score { get; private set; }
     public int Combo { get; private set; }
     public int Round { get; private set; }
+    public bool StageCleared { get; private set; }      // 목표 라운드 달성 여부
+
+    // 현재 난이도의 목표 라운드 수
+    public int RoundGoal
+    {
+        get
+        {
+            int i = (int)CurrentDifficulty;
+            return (roundGoals != null && i < roundGoals.Length) ? roundGoals[i] : 8;
+        }
+    }
 
     public event Action OnStatsChanged;
 
@@ -43,6 +62,8 @@ public class GameManager : MonoBehaviour
     public void StartGame(Difficulty diff)
     {
         CurrentDifficulty = diff;
+        RhythmMode = false;
+        StageCleared = false;
         GameData.Reset();
         CurrentMaxHP = maxHP;
         HP = maxHP;
@@ -50,6 +71,7 @@ public class GameManager : MonoBehaviour
         Combo = 0;
         Round = 0;
         OnStatsChanged?.Invoke();
+        uiManager?.ShowGoal($"목표: 라운드 {RoundGoal} 클리어\n진행: 0 / {RoundGoal}");
 
         sequenceManager.Init(this);
         sequenceManager.ApplyDifficulty(diff);
@@ -65,6 +87,8 @@ public class GameManager : MonoBehaviour
             return;
         }
         CurrentDifficulty = Difficulty.Normal;
+        RhythmMode = true;
+        StageCleared = false;
         GameData.Reset();
         CurrentMaxHP = rhythmMaxHP;
         HP = rhythmMaxHP;
@@ -128,6 +152,7 @@ public class GameManager : MonoBehaviour
         CurrentState = State.Playing;
         Round++;
         OnStatsChanged?.Invoke();
+        uiManager?.ShowGoal($"목표: 라운드 {RoundGoal} 클리어\n진행: {Round - 1} / {RoundGoal}");
         sequenceManager.StartRound(Round);
     }
 
@@ -140,7 +165,19 @@ public class GameManager : MonoBehaviour
         Score += gained;
         GameData.CorrectTouches++;
         OnStatsChanged?.Invoke();
-        uiManager?.OnAudienceReact(Combo); // 관객 반응 시스템
+        uiManager?.OnAudienceReact(Combo); // 무대 조명 연출 (보조)
+    }
+
+    // 보너스 공을 손/드럼스틱으로 쳐냈을 때 (상호작용 — 쳐내기)
+    public void OnBonusBallHit(Vector3 pos)
+    {
+        Score += bonusBallScore;
+        OnStatsChanged?.Invoke();
+
+        // 직관적 피드백: 파티클 + 점수 팝업 + 효과음
+        FeedbackFX.Burst(pos, new Color(1f, 0.85f, 0.2f));
+        FeedbackFX.Popup(pos, "+" + bonusBallScore, new Color(1f, 0.9f, 0.3f));
+        SfxPlayer.Instance?.PlayBall();
     }
 
     // 오답 터치
@@ -153,10 +190,25 @@ public class GameManager : MonoBehaviour
             GameOver();
     }
 
-    // 한 라운드(시퀀스) 완주 → 다음 라운드 카운트다운
+    // 한 라운드(시퀀스) 완주 → 목표 라운드 달성 시 클리어, 아니면 다음 라운드
     public void OnRoundComplete()
     {
+        uiManager?.ShowGoal($"목표: 라운드 {RoundGoal} 클리어\n진행: {Round} / {RoundGoal}");
+
+        if (Round >= RoundGoal)
+        {
+            StageClear();
+            return;
+        }
         StartCoroutine(CountdownThenPlay());
+    }
+
+    // 목표 라운드를 모두 채워 스테이지 클리어
+    void StageClear()
+    {
+        StageCleared = true;
+        uiManager?.ShowBanner("🏆 STAGE CLEAR!", 4f);
+        GameOver();
     }
 
     public void GameOver()

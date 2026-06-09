@@ -11,9 +11,12 @@ public class UIManager : MonoBehaviour
     [Header("패널")]
     public GameObject titlePanel;
     public GameObject hudPanel;
+    public GameObject hpPanel;            // HP 게이지 전용 패널 (HUD와 함께 표시/숨김)
     public GameObject resultPanel;
 
-    [Header("HUD — HP 게이지")]
+    [Header("HUD — HP 표시")]
+    public Image[] hpHearts;              // 이산 HP 아이콘 (HP 수만큼, 하나씩 사라짐 — 사이먼용)
+    public GameObject hpBarRoot;          // fill 바 컨테이너 (리듬 등 대량 HP용)
     public Image hpFill;                  // 채워지는 HP 바 (Image Type=Filled)
     public Text hpText;                   // HP 바 위 숫자 라벨 (예: 64/100)
     public Text scoreText;
@@ -26,6 +29,9 @@ public class UIManager : MonoBehaviour
 
     [Header("기믹 안내 배너")]
     public Text bannerText;               // 역재생/가짜 악기 등 안내
+
+    [Header("스테이지 목표")]
+    public Text goalText;                 // 목표 라운드 진행도 (HUD 좌측)
 
     [Header("튜토리얼")]
     public TutorialManager tutorial;
@@ -53,6 +59,7 @@ public class UIManager : MonoBehaviour
     {
         SetActive(titlePanel, true);
         SetActive(hudPanel, false);
+        SetActive(hpPanel, false);
         SetActive(resultPanel, false);
         SetActive(tutorialPanel, false);
         SetActive(countdownText?.gameObject, false);
@@ -64,6 +71,7 @@ public class UIManager : MonoBehaviour
         if (tutorial == null) return;
         SetActive(titlePanel, false);
         SetActive(hudPanel, false);
+        SetActive(hpPanel, false);
         SetActive(resultPanel, false);
         SetActive(tutorialPanel, true);
         tutorial.StartTutorial();
@@ -88,6 +96,7 @@ public class UIManager : MonoBehaviour
     {
         SetActive(titlePanel, false);
         SetActive(hudPanel, true);
+        SetActive(hpPanel, true);
         SetActive(resultPanel, false);
         game?.StartGame((GameManager.Difficulty)diffIndex);
     }
@@ -100,6 +109,7 @@ public class UIManager : MonoBehaviour
     {
         SetActive(titlePanel, false);
         SetActive(hudPanel, true);
+        SetActive(hpPanel, true);
         SetActive(resultPanel, false);
         SetActive(tutorialPanel, false);
         game?.StartBonusStage();
@@ -143,19 +153,34 @@ public class UIManager : MonoBehaviour
     void RefreshHUD()
     {
         if (game == null) return;
-        // HP 게이지 (이미지 바 + 숫자 라벨) — 사이먼/리듬 공통
         int hpMax = Mathf.Max(1, game.CurrentMaxHP);
         int hpCur = Mathf.Clamp(game.HP, 0, hpMax);
-        float hpRatio = hpCur / (float)hpMax;
-        if (hpFill != null)
+
+        // HP가 아이콘 개수 이하면 이산 아이콘 표시(하나씩 사라짐), 많으면(리듬) fill 바 사용
+        bool useHearts = hpHearts != null && hpHearts.Length > 0 && hpMax <= hpHearts.Length;
+        if (useHearts)
         {
-            hpFill.fillAmount = hpRatio;
-            // 체력에 따라 색 변화: 빨강(낮음) → 노랑 → 초록(높음)
-            hpFill.color = hpRatio > 0.5f
-                ? Color.Lerp(new Color(1f, 0.85f, 0.1f), new Color(0.2f, 0.9f, 0.35f), (hpRatio - 0.5f) * 2f)
-                : Color.Lerp(new Color(0.9f, 0.2f, 0.2f), new Color(1f, 0.85f, 0.1f), hpRatio * 2f);
+            if (hpBarRoot != null) hpBarRoot.SetActive(false);
+            for (int i = 0; i < hpHearts.Length; i++)
+                if (hpHearts[i] != null) hpHearts[i].gameObject.SetActive(i < hpCur);
         }
-        if (hpText != null) hpText.text = $"HP  {hpCur} / {hpMax}";
+        else
+        {
+            for (int i = 0; i < (hpHearts?.Length ?? 0); i++)
+                if (hpHearts[i] != null) hpHearts[i].gameObject.SetActive(false);
+            if (hpBarRoot != null) hpBarRoot.SetActive(true);
+
+            float hpRatio = hpCur / (float)hpMax;
+            if (hpFill != null)
+            {
+                hpFill.fillAmount = hpRatio;
+                // 체력에 따라 색 변화: 빨강(낮음) → 노랑 → 초록(높음)
+                hpFill.color = hpRatio > 0.5f
+                    ? Color.Lerp(new Color(1f, 0.85f, 0.1f), new Color(0.2f, 0.9f, 0.35f), (hpRatio - 0.5f) * 2f)
+                    : Color.Lerp(new Color(0.9f, 0.2f, 0.2f), new Color(1f, 0.85f, 0.1f), hpRatio * 2f);
+            }
+            if (hpText != null) hpText.text = $"HP  {hpCur} / {hpMax}";
+        }
         if (scoreText != null) scoreText.text = "SCORE: " + game.Score;
         if (comboText != null) comboText.text = game.Combo > 1 ? "COMBO x" + game.Combo : "";
         if (roundText != null) roundText.text = "ROUND " + game.Round + "  ·  " + DiffName(game.CurrentDifficulty);
@@ -176,14 +201,22 @@ public class UIManager : MonoBehaviour
             cheerParticle.Play();
     }
 
+    // 스테이지 목표(라운드 진행도) 갱신
+    public void ShowGoal(string text)
+    {
+        if (goalText != null) goalText.text = text;
+    }
+
     public void ShowResult()
     {
         SetActive(hudPanel, false);
+        SetActive(hpPanel, false);
         SetActive(resultPanel, true);
         if (resultText != null)
         {
+            bool cleared = game != null && game.StageCleared;
             resultText.text =
-                "GAME OVER\n\n" +
+                (cleared ? "🏆 STAGE CLEAR!\n\n" : "GAME OVER\n\n") +
                 $"최종 점수: {GameData.FinalScore}\n" +
                 $"최장 콤보: {GameData.MaxCombo}\n" +
                 $"정확도: {GameData.Accuracy:F1}%\n" +
@@ -196,9 +229,10 @@ public class UIManager : MonoBehaviour
     {
         switch (d)
         {
-            case GameManager.Difficulty.Easy:   return "쉬움";
-            case GameManager.Difficulty.Hard:   return "어려움";
-            default:                            return "보통";
+            case GameManager.Difficulty.Easy:      return "쉬움";
+            case GameManager.Difficulty.Hard:      return "어려움";
+            case GameManager.Difficulty.UltraHard: return "초 하드";
+            default:                               return "보통";
         }
     }
 

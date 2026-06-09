@@ -60,6 +60,11 @@ public class SequenceManager : MonoBehaviour
                 lightOnDuration = 0.4f;  gapDuration = 0.18f;
                 _guideMode = false;  // 어려움: 순수 암기
                 break;
+            case GameManager.Difficulty.UltraHard:
+                _activePool = instruments.Length;
+                lightOnDuration = 0.32f; gapDuration = 0.14f;  // 가장 빠름
+                _guideMode = false;  // 초 하드: 순수 암기 + 날아오는 공
+                break;
         }
 
         // 사용하지 않는 악기는 숨김 (선택지 줄이기)
@@ -207,7 +212,16 @@ public class SequenceManager : MonoBehaviour
 
             panel.ShowCorrect();
             TriggerHaptic(0.3f, 0.1f);  // 피드백: 햅틱 (약)
+
+            int before = _game.Score;
             _game.OnCorrect(reaction);
+            int gained = _game.Score - before;
+
+            // 직관적 피드백: 파티클 + 점수 팝업 + 효과음(노트 성공)
+            FeedbackFX.Burst(panel.transform.position, panel.correctColor);
+            FeedbackFX.Popup(panel.transform.position, "+" + gained, panel.correctColor);
+            SfxPlayer.Instance?.PlaySuccess();
+
             _expectIndex++;
 
             if (_expectIndex >= _sequence.Count)
@@ -226,6 +240,7 @@ public class SequenceManager : MonoBehaviour
             // 오답
             panel.ShowWrong();
             TriggerHaptic(0.8f, 0.25f);  // 피드백: 햅틱 (강)
+            SfxPlayer.Instance?.PlayFail();  // 노트 실패음
             _game.OnWrong();
             StartCoroutine(RelightAfter(0.4f));
         }
